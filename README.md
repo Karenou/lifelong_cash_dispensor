@@ -15,13 +15,6 @@ lifelong_cash_dispensor/
 │   ├── style.css
 │   └── app.js
 ├── requirements.txt         # fastapi / uvicorn / numpy
-├── deploy/                  # 部署相关
-│   ├── nginx.conf           # Nginx 子域名配置
-│   ├── ecosystem.config.js  # PM2 进程配置
-│   ├── server-setup.sh      # 服务器初始化（首次执行）
-│   └── deploy.sh            # 本地一键部署脚本
-└── visualization/           # v1 旧版 Streamlit（保留作为备份）
-    └── app.py
 ```
 
 ## 二、本地启动
@@ -48,72 +41,83 @@ uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 - **明细表滚动**：默认显示前 10 行，超出滚动查看，表头冻结
 - **破产备注**：破产时表格下方红字提示「仅展示至破产年份（第 X 年）」
 
-## 四、核心计算逻辑（与 v1 一致）
+## 四、项目背景
 
-详见 calculator.py 的 `run_basic` 和 `run_monte_carlo` 函数。
+这个工具想回答一个很朴素的问题：**「我攒下这笔钱，按每年花这么多，到底能撑多少年？」**
 
-## 五、部署到腾讯云
+它背后的理论是 **Trinity Study（三一研究，1998）** —— 一组学者回测了美国 1926–1995 年的历史数据，研究「退休后每年从投资组合里提固定比例的钱，30 年都不花光的概率」。结论里最有名的一条就是 **4% 法则**：第一年提 4%，之后每年按通胀上调，配 60% 股票 + 40% 债券，30 年不破产的历史成功率很高。
 
-**架构**：
+本项目把这个思想做成一个**可交互的模拟器**：
+
+- 不依赖某一段历史，而是让你自己设定初始资产、年开销、预期收益、通胀；
+- 提供**确定性计算**（固定收益率，算一条明确轨迹）和**蒙特卡洛模拟**（收益率随机波动，算一个破产概率分布）两种视角，帮你从「平均情况」和「极端情况」两个维度看自己的钱够不够花。
+
+适用人群：FIRE 提前退休者、临近退休做现金流规划的人、或者单纯想验证「我是不是花太快了」的普通人。
+
+## 五、核心计算逻辑
+
+计算引擎在 `calculator.py`，分两种模式。
+
+### 5.1 基础模式（确定性迭代）
+
+逐年递推，核心公式：
+
 ```
-用户浏览器 → Nginx (80) → /var/www/lifelong-cash/      (前端静态)
-                       → 127.0.0.1:8001 (uvicorn)      (API 反代)
-                              ↑ PM2 守护
-```
-
-**子域名**：`lifelong-cash-dispensor.finailab.com.cn`
-
-### 部署步骤
-
-#### 1. DNSPod 添加 A 记录
-- 主机记录：`lifelong-cash-dispensor`
-- 记录类型：`A`
-- 记录值：`43.139.209.228`
-
-#### 2. 服务器首次初始化（执行一次）
-```bash
-# 本地：同步项目到服务器
-rsync -avz --exclude='.git' --exclude='venv' \
-  ~/Desktop/ai_product/lifelong_cash_dispensor/ \
-  ubuntu@43.139.209.228:~/lifelong_cash_dispensor/
-
-# 服务器：执行初始化脚本
-ssh ubuntu@43.139.209.228
-cd ~/lifelong_cash_dispensor
-bash deploy/server-setup.sh
+第 1 年提款：  E(1) = E0
+第 t 年提款：  E(t) = E(t-1) × (1 + i)       （i = 通胀率，第 2 年起生效）
+年末资产：     W(t) = (W(t-1) - E(t)) × (1 + R)   （R = 固定年化收益率）
+破产判定：     任一年 W(t) ≤ 0 ，即第 t 年耗尽
 ```
 
-#### 3. 配置 Nginx
-```bash
-# 服务器上执行
-sudo cp ~/lifelong_cash_dispensor/deploy/nginx.conf \
-        /etc/nginx/sites-available/lifelong-cash.finailab.com.cn
-sudo ln -s /etc/nginx/sites-available/lifelong-cash.finailab.com.cn \
-           /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
+也就是说：**年初先按通胀提一笔钱，剩下来的钱在当年收益率下增值，得到年末资产**，如此一年一年滚下去。
+
+### 5.2 蒙特卡洛模式（随机模拟）
+
+和基础模式唯一的区别：把「固定收益率 R」换成了「**每年从正态分布 N(μ, σ) 随机抽一个收益率**」，然后把这个逐年过程重复跑 N 次（CLI 默认 10000 次，API 默认 5000 次），最后汇总：
+
+- **破产概率** = 破产次数 / 总模拟次数
+- **存活概率** = 1 - 破产概率
+- **分位资产路径** = 取每年资产值的 5% / 25% / 50%(中位) / 75% / 95% 分位数，画成扇形区间
+
+这能直观看出「最差情况（5% 分位）下钱几岁花光，最好情况（95% 分位）下能留多少遗产」。
+
+### 5.3 计算流程图
+
+```
+                    ┌─────────────────────────────┐
+                    │   输入参数                   │
+                    │  W0 初始资产 / E0 或 rate    │
+                    │  T 年限 / i 通胀 / R 收益    │
+                    └──────────────┬──────────────┘
+                                   │
+                    ┌──────────────▼──────────────┐
+                    │  计算首年提款 E0              │
+                    │  E0 = rate × W0  （若给的是率）│
+                    └──────────────┬──────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              │ 基础模式 run_basic                       │ 蒙特卡洛 run_monte_carlo
+              │ 每年用固定 R                            │ 每年从 N(μ,σ) 抽样 r_t
+              └────────────────────┬────────────────────┘
+                                   │
+                    ┌──────────────▼──────────────┐
+                    │  逐年迭代 (t = 1..T)         │
+                    │  E(t)=E(t-1)×(1+i)          │
+                    │  W(t)=(W(t-1)-E(t))×(1+r_t) │
+                    │  若 W(t)≤0 → 标记破产        │
+                    └──────────────┬──────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              │ 输出：逐年轨迹 + 破产年份               │ 输出：N 次轨迹
+              └────────────────────┬────────────────────┘
+                                   │
+                    ┌──────────────▼──────────────┐
+                    │  汇总                          │
+                    │ 基础：最终残值 / 是否破产      │ 蒙特卡洛：破产概率 + 分位路径
+                    └───────────────────────────────┘
 ```
 
-#### 4. 后续更新（本地一键执行）
-```bash
-cd ~/Desktop/ai_product/lifelong_cash_dispensor
-bash deploy/deploy.sh
-```
-
-### 运维速查
-
-```bash
-# PM2 操作
-pm2 logs lifelong-cash              # 实时日志
-pm2 restart lifelong-cash           # 重启
-pm2 monit                           # 监控面板
-
-# Nginx
-sudo nginx -t && sudo systemctl reload nginx
-sudo tail -f /var/log/nginx/lifelong-cash.error.log
-
-# 验证 API
-curl http://127.0.0.1:8001/api/presets
-```
+> 注：代码里还支持「分阶段收益率 / 逐年自定义收益率」（`build_return_params` 的 phases / yearly 参数），适合你认为「前 10 年高波动、后 20 年低波动」这类场景；Web 端当前用的是「全局统一 μ,σ」简化版。
 
 ## 六、参考文献
 
