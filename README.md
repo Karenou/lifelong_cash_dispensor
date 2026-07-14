@@ -1,195 +1,123 @@
-# 长周期资产消耗计算器（Lifelong Cash Withdrawer）
+# 长周期资产消耗计算器（Lifelong Cash Dispenser）
 
-## 一、背景与动机
+> 基于 Trinity Study 的退休资产模拟工具 — 给定初始资产、年度开销与投资组合，资产能撑多少年？
 
-### 1.1 为什么要做这个？
+## 一、当前版本（v2.0）
 
-在《漫步华尔街》（A Random Walk Down Wall Street）中，马基尔（Burton Malkiel）的核心观点是：
-通过多元化的资产配置，普通人可以构建一个长期增值的投资组合。
-
-而"三一研究（Trinity Study）"则回答了另一个关键问题：
-**退休后，每年可以安全提取多少钱，才能保证资产不比人先"破产"？**
-
-两者结合，就是本计算器要解决的问题：
-
-> 给定一个初始资产、一个年度开销、一个投资组合，
-> 在考虑通胀的前提下，资产能撑多少年？
-
-### 1.2 使用场景
-
-- 退休规划：我攒够了 X 万，每年花 Y 万，能花多少年？
-- 提前退休（FIRE）验证：4% 提款率在中国市场是否安全？
-- 资产配置决策：股债比例如何影响资产寿命？
-- 线上网页：https://lifelong-cash-dispensor.streamlit.app/
-
-## 二、核心输入参数
+前后端分离架构，紫调留白现代风：
 
 ```
-+----------------------------------------------+
-|           输入参数（4 个维度）                  |
-+----------------------------------------------+
-|                                              |
-|  A. 初始状态                                  |
-|     - W0: 初始资产总额（如 ¥5,000,000）        |
-|     - E0: 首年计划提款金额（如 ¥200,000）       |
-|     - 首年提款率 = E0 / W0（如 4%）            |
-|                                              |
-|  B. 宏观环境与生命周期                          |
-|     - T: 规划年限（如 30~40 年）               |
-|     - i: 预计长期通胀率（如 2%~3%）            |
-|                                              |
-|  C. 资产配置与回报                             |
-|     - R: 组合预期年化收益率（如 7%）            |
-|     - σ: 组合年化波动率（高级，蒙特卡洛用）      |
-|                                              |
-+----------------------------------------------+
+lifelong_cash_dispensor/
+├── calculator.py            # 核心计算引擎（不变）
+├── server.py                # FastAPI 后端（/api/simulate、/api/presets）
+├── static/                  # 前端
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── requirements.txt         # fastapi / uvicorn / numpy
+├── deploy/                  # 部署相关
+│   ├── nginx.conf           # Nginx 子域名配置
+│   ├── ecosystem.config.js  # PM2 进程配置
+│   ├── server-setup.sh      # 服务器初始化（首次执行）
+│   └── deploy.sh            # 本地一键部署脚本
+└── visualization/           # v1 旧版 Streamlit（保留作为备份）
+    └── app.py
 ```
 
+## 二、本地启动
 
-## 三、核心计算逻辑
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
 
-### 3.1 年终迭代公式
+# 2. 启动服务
+cd lifelong_cash_dispensor
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 
-对每个预测年份 t（t = 1, 2, ..., T）：
-
-**步骤① 计算当年名义提款需求**
-
-```
-E(t) = E(t-1) × (1 + i)
-
-含义：生活费每年随通胀增长，保证购买力不变
-```
-
-**步骤② 资产期末结算**
-
-```
-W(t) = (W(t-1) - E(t)) × (1 + R)
-
-含义：年初提款后，剩余资产经过一年投资增长
+# 3. 打开浏览器
+# 访问 http://localhost:8000
 ```
 
-**步骤③ 生存边界判定**
+## 三、功能特性
 
-```
-如果 W(t) <= 0 且 t < T：
-    → 资产提早耗尽（破产），记录失败年份，终止循环
-```
+- **实时联动**：拖动滑块自动重算（300ms debounce），不用点按钮
+- **预设场景**：4% 法则 / FIRE 激进 / 保守稳健 / 高消费验证 一键加载
+- **响应式布局**：桌面端 + 移动端自适应
+- **ECharts 图表**：资产轨迹、提款率、蒙特卡洛扇形图
+- **CSV 导出**：逐年明细一键下载
+- **明细表滚动**：默认显示前 10 行，超出滚动查看，表头冻结
+- **破产备注**：破产时表格下方红字提示「仅展示至破产年份（第 X 年）」
 
-### 3.2 计算流程（ASCII 图）
+## 四、核心计算逻辑（与 v1 一致）
 
+详见 calculator.py 的 `run_basic` 和 `run_monte_carlo` 函数。
+
+## 五、部署到腾讯云
+
+**架构**：
 ```
-开始
-  |
-  v
-[初始化] W = W0, E = E0, t = 0，E0 = W0 × rate 
-  |
-  v
-+---> t = t + 1
-|       |
-|       v
-|     E(t) = E(t-1) × (1 + i)        ← 通胀调整提款额
-|       |
-|       v
-|     W(t) = (W(t-1) - E(t)) × (1+R)  ← 提款后增长
-|       |
-|       v
-|     W(t) <= 0 ?
-|       |         \
-|      否          是
-|       |           \
-|       v            v
-|     t >= T ?     [破产] 输出失败年份 t
-|       |    \         |
-|      否     是       v
-|       |      \     结束
-+-------+       v
-              [成功] 输出最终残值 W(T)
-                |
-                v
-              结束
+用户浏览器 → Nginx (80) → /var/www/lifelong-cash/      (前端静态)
+                       → 127.0.0.1:8001 (uvicorn)      (API 反代)
+                              ↑ PM2 守护
 ```
 
-### 3.3 高级模式：蒙特卡洛模拟
+**子域名**：`lifelong-cash-dispensor.finailab.com.cn`
 
-基础模式假设每年收益率恒定为 R，但现实中收益率波动很大（序列风险）。
+### 部署步骤
 
-高级模式引入**逐年独立的正态分布**来模拟收益率的随机性：
+#### 1. DNSPod 添加 A 记录
+- 主机记录：`lifelong-cash-dispensor`
+- 记录类型：`A`
+- 记录值：`43.139.209.228`
 
-**核心思路：**
-- 每年 t 的收益率 R(t) 从正态分布 N(μ_t, σ_t²) 中随机抽取
-- 其中 μ_t（均值）和 σ_t（标准差）为每年各自的超参数
-- 用户可以为不同年份/阶段设置不同的 (μ, σ) 组合
+#### 2. 服务器首次初始化（执行一次）
+```bash
+# 本地：同步项目到服务器
+rsync -avz --exclude='.git' --exclude='venv' \
+  ~/Desktop/ai_product/lifelong_cash_dispensor/ \
+  ubuntu@43.139.209.228:~/lifelong_cash_dispensor/
 
-**参数输入方式（三种模式）：**
-
-```
-+---------------------------------------------------------------+
-|  模式①：全局统一                                               |
-|    所有年份共用同一组参数：μ = 7%, σ = 15%                      |
-|                                                               |
-|  模式②：分阶段设定                                             |
-|    阶段1 (第1~10年)：μ1 = 8%, σ1 = 18%  ← 高风险高收益阶段    |
-|    阶段2 (第11~20年)：μ2 = 6%, σ2 = 12% ← 中等风险阶段        |
-|    阶段3 (第21~30年)：μ3 = 5%, σ3 = 8%  ← 保守阶段            |
-|                                                               |
-|  模式③：逐年自定义                                             |
-|    提供长度为 T 的列表：[(μ1,σ1), (μ2,σ2), ..., (μT,σT)]      |
-+---------------------------------------------------------------+
+# 服务器：执行初始化脚本
+ssh ubuntu@43.139.209.228
+cd ~/lifelong_cash_dispensor
+bash deploy/server-setup.sh
 ```
 
-**迭代公式变更：**
-
+#### 3. 配置 Nginx
+```bash
+# 服务器上执行
+sudo cp ~/lifelong_cash_dispensor/deploy/nginx.conf \
+        /etc/nginx/sites-available/lifelong-cash.finailab.com.cn
+sudo ln -s /etc/nginx/sites-available/lifelong-cash.finailab.com.cn \
+           /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
 ```
-对每次模拟的每年 t：
-  R(t) ~ N(μ_t, σ_t²)          ← 从该年对应的正态分布中抽样
-  W(t) = (W(t-1) - E(t)) × (1 + R(t))
+
+#### 4. 后续更新（本地一键执行）
+```bash
+cd ~/Desktop/ai_product/lifelong_cash_dispensor
+bash deploy/deploy.sh
 ```
 
-**模拟流程：**
-- 重复模拟 N 次（如 10000 次）
-- 每次模拟中，逐年从对应的 N(μ_t, σ_t²) 独立抽取收益率
-- 统计"破产概率" = 破产次数 / N
-- 输出不同置信度下的资产路径（如 5%/25%/50%/75%/95% 分位）
+### 运维速查
 
+```bash
+# PM2 操作
+pm2 logs lifelong-cash              # 实时日志
+pm2 restart lifelong-cash           # 重启
+pm2 monit                           # 监控面板
 
-## 四、输出结果
+# Nginx
+sudo nginx -t && sudo systemctl reload nginx
+sudo tail -f /var/log/nginx/lifelong-cash.error.log
 
-| 输出项 | 说明 |
-|--------|------|
-| 资产轨迹表 | 每年的 W(t)、E(t) 明细 |
-| 是否破产 | 是/否，及破产年份 |
-| 最终残值 | W(T) 的金额 |
-| 实际提款率曲线 | E(t)/W(t-1) 随时间的变化 |
-| （高级）破产概率 | 蒙特卡洛下的存活率 |
-| （高级）资产路径扇形图 | 不同分位数下的资产轨迹 |
-
-
-## 五、执行计划
-
-### Phase 1：基础计算引擎
-- [ ] 搭建项目结构（config / core / output）
-- [ ] 实现确定性迭代计算（固定收益率）
-- [ ] 支持 CLI 输入参数
-- [ ] 输出 CSV / 控制台表格
-
-### Phase 2：蒙特卡洛模拟
-- [ ] 引入随机收益率（正态分布抽样）
-- [ ] 批量模拟 + 统计破产概率
-- [ ] 输出分位数路径
-
-### Phase 3：可视化 & 交互
-- [ ] 生成资产轨迹折线图（matplotlib）
-- [ ] （可选）Streamlit / Dash 网页交互面板
-
-### Phase 4：扩展功能
-- [ ] 支持动态资产配置（随年龄调整股债比）
-- [ ] 支持非固定提款策略（如 Guardrails 策略）
-- [ ] 对接真实历史数据回测
-
+# 验证 API
+curl http://127.0.0.1:8001/api/presets
+```
 
 ## 六、参考文献
 
-1. Burton Malkiel,《漫步华尔街》（A Random Walk Down Wall Street）
-2. Trinity Study (Cooley, Hubbard, Walz, 1998) - "Retirement Savings: Choosing a Withdrawal Rate That Is Sustainable"
-3. William Bengen (1994) - "Determining Withdrawal Rates Using Historical Data"
+1. Burton Malkiel,《漫步华尔街》
+2. Trinity Study (Cooley, Hubbard, Walz, 1998)
+3. William Bengen (1994) - Determining Withdrawal Rates Using Historical Data
 4. Early Retirement Now (ERN) - Safe Withdrawal Rate Series

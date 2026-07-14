@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>人生提款模拟器 · Lifelong Cash Dispenser</title>
+  <meta name="description" content="基于 Trinity Study 的退休资产模拟工具 — 资产能撑多少年？" />
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- ECharts -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="/static/style.css" />
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: {
+              50:  '#F7F6FB',
+              100: '#EEEDFE',
+              200: '#CECBF6',
+              300: '#AFA9EC',
+              400: '#7F77DD',
+              500: '#534AB7',
+              600: '#3C3489',
+              800: '#26215C',
+              900: '#1A163F',
+            },
+          },
+          fontFamily: {
+            sans: ['Inter', 'Manrope', '-apple-system', 'PingFang SC', 'sans-serif'],
+            display: ['Manrope', 'Inter', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+</head>
+
+<body class="min-h-screen bg-ink-50 text-ink-900 font-sans antialiased">
+
+  <!-- ===================== Hero ===================== -->
+  <header class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 pb-6">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-8 h-8 rounded-lg bg-ink-500 flex items-center justify-center text-white text-sm font-semibold">¥</div>
+          <span class="text-xs font-medium tracking-wider text-ink-600 uppercase">Lifelong Cash Dispenser</span>
+        </div>
+        <h1 class="font-display text-3xl sm:text-4xl font-bold text-ink-900 tracking-tight">人生提款模拟器</h1>
+        <p class="mt-2 text-sm sm:text-base text-ink-600 max-w-xl">基于 Trinity Study 的退休资产模拟工具 — 给定初始资产、年度开销与投资组合，资产能撑多少年？</p>
+      </div>
+
+      <!-- 预设场景 -->
+      <div class="flex flex-wrap gap-2" id="presets-container">
+        <span class="text-xs text-ink-600 self-center mr-1">预设场景</span>
+        <!-- 预设按钮由 JS 注入 -->
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================== 主体 ===================== -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+
+    <!-- ---------- 控制面板 ---------- -->
+    <section class="card mb-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-base font-semibold text-ink-900">参数设置</h2>
+        <button id="reset-btn" class="text-xs text-ink-500 hover:text-ink-800 transition">重置</button>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+
+        <!-- 初始资产 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">初始资产</label>
+            <span class="param-value" id="w0-display">¥1,000,000</span>
+          </div>
+          <input type="range" id="w0" min="100000" max="10000000" step="100000" value="1000000" class="slider" />
+          <div class="param-range"><span>10万</span><span>1000万</span></div>
+        </div>
+
+        <!-- 提款率 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">首年提款率</label>
+            <span class="param-value" id="rate-display">4.0%</span>
+          </div>
+          <input type="range" id="rate" min="0.01" max="0.10" step="0.005" value="0.04" class="slider" />
+          <div class="param-range"><span>1%</span><span>10%</span></div>
+          <div class="param-hint" id="e0-hint">首年提款 ¥40,000</div>
+        </div>
+
+        <!-- 规划年限 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">规划年限</label>
+            <span class="param-value" id="years-display">30 年</span>
+          </div>
+          <input type="range" id="years" min="5" max="60" step="1" value="30" class="slider" />
+          <div class="param-range"><span>5年</span><span>60年</span></div>
+        </div>
+
+        <!-- 通胀率 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">预期通胀率</label>
+            <span class="param-value" id="inflation-display">3.0%</span>
+          </div>
+          <input type="range" id="inflation" min="0" max="0.08" step="0.005" value="0.03" class="slider" />
+          <div class="param-range"><span>0%</span><span>8%</span></div>
+        </div>
+
+        <!-- 预期收益率 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">预期年化收益 (μ)</label>
+            <span class="param-value" id="return-rate-display">5.5%</span>
+          </div>
+          <input type="range" id="return-rate" min="0" max="0.20" step="0.005" value="0.055" class="slider" />
+          <div class="param-range"><span>0%</span><span>20%</span></div>
+        </div>
+
+        <!-- 收益率标准差 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">收益率波动 (σ)</label>
+            <span class="param-value" id="sigma-display">15%</span>
+          </div>
+          <input type="range" id="sigma" min="0.01" max="0.40" step="0.01" value="0.15" class="slider" />
+          <div class="param-range"><span>1%</span><span>40%</span></div>
+        </div>
+
+        <!-- 模拟次数 -->
+        <div class="param-block">
+          <div class="flex items-baseline justify-between mb-1.5">
+            <label class="param-label">蒙特卡洛模拟次数</label>
+            <span class="param-value" id="sims-display">5,000</span>
+          </div>
+          <input type="range" id="sims" min="1000" max="50000" step="1000" value="5000" class="slider" />
+          <div class="param-range"><span>1k</span><span>50k</span></div>
+        </div>
+
+        <!-- 开关：蒙特卡洛 -->
+        <div class="param-block flex flex-col justify-center">
+          <label class="param-label mb-2">启用蒙特卡洛</label>
+          <label class="toggle">
+            <input type="checkbox" id="enable-mc" checked />
+            <span class="toggle-track">
+              <span class="toggle-thumb"></span>
+            </span>
+            <span class="text-xs text-ink-600" id="mc-status">已开启</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 指标卡 ---------- -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+      <div class="metric-card">
+        <div class="metric-label">模拟结果</div>
+        <div class="metric-value" id="m-status">—</div>
+        <div class="metric-sub" id="m-status-sub">等待计算</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">破产概率</div>
+        <div class="metric-value text-coral" id="m-bankrupt">—</div>
+        <div class="metric-sub" id="m-bankrupt-sub">蒙特卡洛</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">存活率</div>
+        <div class="metric-value text-teal" id="m-survival">—</div>
+        <div class="metric-sub" id="m-survival-sub">蒙特卡洛</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">中位数残值</div>
+        <div class="metric-value" id="m-median">—</div>
+        <div class="metric-sub" id="m-median-sub">蒙特卡洛</div>
+      </div>
+    </section>
+
+    <!-- ---------- 图表区 ---------- -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+
+      <!-- 资产轨迹 + 提款（占 2 列） -->
+      <div class="chart-card lg:col-span-2">
+        <div class="chart-header">
+          <div>
+            <h3 class="chart-title">资产轨迹与提款金额</h3>
+            <p class="chart-desc">基础模式 · 固定收益率迭代</p>
+          </div>
+          <span class="badge badge-ink">基础模式</span>
+        </div>
+        <div id="chart-basic" class="chart-body"></div>
+      </div>
+
+      <!-- 提款率曲线 -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <h3 class="chart-title">实际提款率</h3>
+            <p class="chart-desc">E(t) / W(t-1) 趋势</p>
+          </div>
+        </div>
+        <div id="chart-ratio" class="chart-body"></div>
+      </div>
+    </section>
+
+    <!-- 蒙特卡洛扇形图 -->
+    <section class="chart-card mb-6" id="mc-section">
+      <div class="chart-header">
+        <div>
+          <h3 class="chart-title">蒙特卡洛资产路径扇形图</h3>
+          <p class="chart-desc" id="mc-desc">5% / 25% / 50% / 75% / 95% 分位数路径</p>
+        </div>
+        <span class="badge badge-purple">蒙特卡洛</span>
+      </div>
+      <div id="chart-mc" class="chart-body-tall"></div>
+    </section>
+
+    <!-- ---------- 明细表 ---------- -->
+    <section class="card">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-ink-900">逐年明细</h3>
+        <button id="export-csv" class="btn-secondary">导出 CSV</button>
+      </div>
+      <div class="detail-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>年份</th>
+              <th class="text-right">年初资产</th>
+              <th class="text-right">提款金额</th>
+              <th class="text-right">提款率</th>
+              <th class="text-right">收益率</th>
+              <th class="text-right">年末资产</th>
+            </tr>
+          </thead>
+          <tbody id="detail-tbody">
+            <tr><td colspan="6" class="text-center text-ink-500 py-8">点击预设或调整参数后查看明细</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="detail-note" id="detail-note"></div>
+    </section>
+
+  </main>
+
+  <!-- 加载浮层 -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div class="text-sm text-ink-600 mt-3" id="loading-text">计算中...</div>
+    </div>
+  </div>
+
+  <footer class="border-t border-ink-200/40 py-6 text-center text-xs text-ink-500">
+    <p>基于 Trinity Study · 数据仅供参考，不构成投资建议</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
