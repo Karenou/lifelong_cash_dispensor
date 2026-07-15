@@ -17,19 +17,10 @@ lifelong_cash_dispensor/
 ├── requirements.txt         # fastapi / uvicorn / numpy
 ```
 
-## 二、本地启动
+## 二、访问网址
 
-```bash
-# 1. 安装依赖
-pip install -r requirements.txt
+- 访问网站（申请备案中） http://lifelong-cash.finailab.top:8080
 
-# 2. 启动服务
-cd lifelong_cash_dispensor
-uvicorn server:app --host 0.0.0.0 --port 8000 --reload
-
-# 3. 打开浏览器
-# 访问 http://localhost:8000
-```
 
 ## 三、功能特性
 
